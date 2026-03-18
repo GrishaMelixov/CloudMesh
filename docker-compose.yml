@@ -1,17 +1,12 @@
 version: "3.9"
 
-# Shared environment variables injected into every application service
 x-app-env: &app-env
-  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  KAFKA_BROKERS: kafka:9092
+  KAFKA_TOPIC_RAW: cloudmesh.logs.raw
+  KAFKA_TOPIC_ERRORS: cloudmesh.logs.errors
   CLICKHOUSE_HOST: clickhouse
   CLICKHOUSE_PORT: "9000"
-  CLICKHOUSE_DB: cloudmesh
-  RABBITMQ_HOST: rabbitmq
-  RABBITMQ_PORT: "5672"
-  RABBITMQ_USER: guest
-  RABBITMQ_PASS: guest
-  LOG_COLLECTOR_HOST: log-collector
-  LOG_COLLECTOR_PORT: "50051"
+  RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
 
 services:
 
@@ -24,9 +19,8 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "2181"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 5s
+      retries: 10
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -43,14 +37,11 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
-      KAFKA_LOG_RETENTION_MS: 86400000  # 24h
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
-      interval: 15s
-      timeout: 10s
-      retries: 8
+      interval: 10s
+      retries: 15
 
-  # Creates required topics idempotently on startup
   kafka-init:
     image: confluentinc/cp-kafka:7.5.0
     depends_on:
@@ -61,39 +52,29 @@ services:
       - |
         kafka-topics --create --if-not-exists \
           --bootstrap-server kafka:9092 \
-          --topic cloudmesh.logs.raw \
-          --partitions 12 \
-          --replication-factor 1 \
-          --config retention.ms=86400000 \
-          --config compression.type=lz4
+          --topic cloudmesh.logs.raw --partitions 12 --replication-factor 1 \
+          --config retention.ms=86400000 --config compression.type=lz4
         kafka-topics --create --if-not-exists \
           --bootstrap-server kafka:9092 \
-          --topic cloudmesh.logs.errors \
-          --partitions 3 \
-          --replication-factor 1 \
-          --config retention.ms=604800000 \
-          --config compression.type=lz4
-        echo "✓ Kafka topics created"
+          --topic cloudmesh.logs.errors --partitions 3 --replication-factor 1 \
+          --config retention.ms=604800000 --config compression.type=lz4
+        echo "Topics created"
 
   rabbitmq:
     image: rabbitmq:3.12-management
     ports:
       - "5672:5672"
-      - "15672:15672"   # Management UI: http://localhost:15672 (guest/guest)
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
+      - "15672:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+      interval: 5s
+      retries: 20
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.3
     ports:
-      - "8123:8123"   # HTTP interface (curl-friendly)
-      - "9000:9000"   # Native TCP (clickhouse-driver)
+      - "8123:8123"
+      - "9000:9000"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./scripts/init-clickhouse-schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
@@ -103,24 +84,20 @@ services:
         hard: 262144
     healthcheck:
       test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+      interval: 5s
+      retries: 20
 
-  # ── Application Services ──────────────────────────────────────────────────
+  # ── Application ───────────────────────────────────────────────────────────
 
   log-collector:
     build:
       context: .
-      dockerfile: services/log-collector/Dockerfile
+      dockerfile: deployments/docker/Dockerfile.collector
     ports:
-      - "50051:50051"   # gRPC
-      - "50052:50052"   # HTTP REST shim (for benchmark comparison)
+      - "50051:50051"
     environment:
       <<: *app-env
-      GRPC_PORT: "50051"
-      HTTP_PORT: "50052"
-      KAFKA_TOPIC_RAW: cloudmesh.logs.raw
+      GRPC_ADDR: ":50051"
     depends_on:
       kafka:
         condition: service_healthy
@@ -129,12 +106,12 @@ services:
   log-producer:
     build:
       context: .
-      dockerfile: services/log-producer/Dockerfile
+      dockerfile: deployments/docker/Dockerfile.producer
     environment:
       <<: *app-env
-      EVENTS_PER_SECOND: "200"
+      LOG_COLLECTOR_ADDR: log-collector:50051
+      EVENTS_PER_SEC: "200"
       BATCH_SIZE: "500"
-      SERVICE_NAMES: "payment-service,auth-service,inventory-service,api-gateway,notification-service"
       ERROR_RATE_PCT: "5"
     depends_on:
       - log-collector
@@ -143,17 +120,11 @@ services:
   log-aggregator:
     build:
       context: .
-      dockerfile: services/log-aggregator/Dockerfile
+      dockerfile: deployments/docker/Dockerfile.aggregator
     environment:
       <<: *app-env
-      KAFKA_TOPIC_RAW: cloudmesh.logs.raw
-      KAFKA_TOPIC_ERRORS: cloudmesh.logs.errors
-      KAFKA_GROUP_ID: clickhouse-writers
-      CLICKHOUSE_BATCH_SIZE: "5000"
-      CLICKHOUSE_FLUSH_INTERVAL_SECONDS: "5"
-      ERROR_RATE_THRESHOLD_PCT: "10"
-      ERROR_RATE_WINDOW_SECONDS: "60"
-      RABBITMQ_EXCHANGE: cloudmesh.alerts
+      ERROR_RATE_THRESHOLD: "10"
+      ERROR_RATE_WINDOW_SEC: "60"
     depends_on:
       kafka:
         condition: service_healthy
@@ -166,12 +137,12 @@ services:
   metrics-api:
     build:
       context: .
-      dockerfile: services/metrics-api/Dockerfile
+      dockerfile: deployments/docker/Dockerfile.api
     ports:
-      - "8000:8000"   # REST API: http://localhost:8000/docs
+      - "8080:8080"
     environment:
       <<: *app-env
-      API_PORT: "8000"
+      HTTP_ADDR: ":8080"
     depends_on:
       clickhouse:
         condition: service_healthy

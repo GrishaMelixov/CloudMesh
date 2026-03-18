@@ -1,5 +1,0 @@
-grpcio==1.63.0
-grpcio-tools==1.63.0
-protobuf==4.25.3
-faker==24.11.0
-python-dotenv==1.0.1

@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package cloudmesh.logs.v1;
 
+option go_package = "github.com/GrishaMelixov/CloudMesh/proto;proto";
+
 // One log event from any service in the cluster
 message LogEvent {
   string event_id     = 1;  // UUIDv4, used for deduplication

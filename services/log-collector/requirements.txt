@@ -1,7 +1,0 @@
-grpcio==1.63.0
-grpcio-tools==1.63.0
-protobuf==4.25.3
-confluent-kafka==2.4.0
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
-python-dotenv==1.0.1

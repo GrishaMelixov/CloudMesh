@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudmesh-config
+  namespace: cloudmesh
+data:
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-service:9092"
+  KAFKA_TOPIC_RAW: "cloudmesh.logs.raw"
+  KAFKA_TOPIC_ERRORS: "cloudmesh.logs.errors"
+  KAFKA_GROUP_ID: "clickhouse-writers"
+  CLICKHOUSE_HOST: "clickhouse-service"
+  CLICKHOUSE_PORT: "9000"
+  CLICKHOUSE_DB: "cloudmesh"
+  RABBITMQ_HOST: "rabbitmq-service"
+  RABBITMQ_PORT: "5672"
+  LOG_COLLECTOR_HOST: "log-collector-service"
+  LOG_COLLECTOR_PORT: "50051"
+  GRPC_PORT: "50051"
+  HTTP_PORT: "50052"
+  EVENTS_PER_SECOND: "200"
+  BATCH_SIZE: "500"
+  ERROR_RATE_PCT: "5"
+  SERVICE_NAMES: "payment-service,auth-service,inventory-service,api-gateway,notification-service"
+  CLICKHOUSE_BATCH_SIZE: "5000"
+  CLICKHOUSE_FLUSH_INTERVAL_SECONDS: "5"
+  ERROR_RATE_THRESHOLD_PCT: "10"
+  ERROR_RATE_WINDOW_SECONDS: "60"
+  RABBITMQ_EXCHANGE: "cloudmesh.alerts"
+  API_PORT: "8000"

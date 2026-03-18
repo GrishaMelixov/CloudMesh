@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package cloudmesh.logs.v1;
+
+// One log event from any service in the cluster
+message LogEvent {
+  string event_id     = 1;  // UUIDv4, used for deduplication
+  string service_name = 2;  // e.g. "payment-service"
+  string host         = 3;  // originating hostname / pod name
+  string level        = 4;  // DEBUG | INFO | WARN | ERROR | FATAL
+  string message      = 5;  // raw log line
+  int64  timestamp_ms = 6;  // Unix epoch in milliseconds
+  map<string, string> labels = 7;  // arbitrary key/value (trace_id, user_id, etc.)
+}
+
+// Batch is the primary transport unit — amortises gRPC overhead across events
+message LogBatch {
+  repeated LogEvent events = 1;
+  string producer_id       = 2;  // identifies the sending instance
+}
+
+// Server response after receiving a batch
+message CollectResponse {
+  uint32 accepted = 1;  // events accepted into Kafka pipeline
+  uint32 rejected = 2;  // events that failed schema validation
+  string batch_id = 3;  // server-assigned ID for producer-side tracing
+}
+
+// RPC surface exposed by log-collector
+service LogCollector {
+  // Primary: send a batch, receive a receipt (unary RPC)
+  rpc CollectBatch(LogBatch) returns (CollectResponse);
+
+  // High-throughput: client-side streaming for continuous ingestion
+  rpc StreamLogs(stream LogEvent) returns (CollectResponse);
+}
